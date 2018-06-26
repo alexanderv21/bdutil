@@ -91,6 +91,9 @@ Flags:
   --network
     Specify a network name with which to associate new virtual machines.
 
+  --subnet
+    Specify a subnetwork with which to associate new virtual machines.
+
   -n, --num_workers
     The number of worker nodes to create.
 
@@ -341,6 +344,7 @@ function prompt_confirmation() {
       GCE_IMAGE_FAMILY='${GCE_IMAGE_FAMILY?}'
       GCE_ZONE='${GCE_ZONE?}'
       GCE_NETWORK='${GCE_NETWORK?}'
+      GCE_SUBNET='${GCE_SUBNET?}'
       GCE_TAGS='${GCE_TAGS?}'
       PREEMPTIBLE_FRACTION=${PREEMPTIBLE_FRACTION?}
       PREFIX='${PREFIX?}'
@@ -397,8 +401,14 @@ function run_gcloud_compute_ssh() {
   extra_args+=('--ssh-flag=-oServerAliveCountMax=3')
   extra_args+=('--ssh-flag=-oConnectTimeout=30')
 
-  run_gcloud_compute_cmd ssh ${hostname} \
-      --command="${remote_command}" "${extra_args[@]}"
+  if (( "${INTERNAL_IP}" )); then
+    run_gcloud_compute_cmd ssh ${hostname} \
+        --command="${remote_command}" "${extra_args[@]}"
+  else
+    loginfo 'Using gcloud beta for Internal IP feature.'
+    run_gcloud_beta_compute_cmd ssh ${hostname} --internal-ip \
+        --command="${remote_command}" "${extra_args[@]}"
+  fi
 }
 
 # The gcloud compute command with global flags and some common command flags to
@@ -420,6 +430,58 @@ function run_gcloud_compute_cmd() {
   fi
 
   full_cmd=(gcloud "${gcloud_flags[@]}" compute "${gcloud_compute_args[@]}")
+
+  if (( ${RAW_MODE} )); then
+    loginfo "Running ${full_cmd[@]}"
+    "${full_cmd[@]}"
+  elif (( ${VERBOSE_MODE} )); then
+    loginfo "Running ${full_cmd[@]}"
+    "${full_cmd[@]}" \
+        2> >(tee -a ${GCLOUD_COMPUTE_STDERR_FILE} 1>&2) \
+        1> >(tee -a ${GCLOUD_COMPUTE_STDOUT_FILE}) \
+        < /dev/null
+  else
+    echo -n "."
+    "${full_cmd[@]}" \
+        2>>${GCLOUD_COMPUTE_STDERR_FILE} \
+        1>>${GCLOUD_COMPUTE_STDOUT_FILE} \
+        < /dev/null
+  fi
+
+  local exitcode=$?
+  if (( ${exitcode} != 0 )); then
+    if [[ "$*" =~ "--command=exit 0" ]]; then
+      # This is just an sshability check; only log it to debug.
+      logdebug "Exited ${exitcode} : ${full_cmd[@]}"
+    else
+      logerror "Exited ${exitcode} : ${full_cmd[@]}"
+    fi
+    loginfo "Exited ${exitcode} : ${full_cmd[@]}" >> ${VM_DEBUG_FILE}
+  else
+    echo -n '.'
+  fi
+  return ${exitcode}
+}
+
+# The gcloud compute command with global flags and some common command flags to
+# use for all GCE operations.
+function run_gcloud_beta_compute_cmd() {
+  local gcloud_compute_args=("$@")
+  local gcloud_flags=()
+
+  # Add global flags
+  gcloud_flags+=("--project=${PROJECT}")
+  gcloud_flags+=('--quiet')
+
+  gcloud_compute_args+=("--zone=${GCE_ZONE}")
+
+  if (( ${DEBUG_MODE} )); then
+    gcloud_flags+=('--verbosity=debug')
+  else
+    gcloud_flags+=('--verbosity=info')
+  fi
+
+  full_cmd=(gcloud beta "${gcloud_flags[@]}" compute "${gcloud_compute_args[@]}")
 
   if (( ${RAW_MODE} )); then
     loginfo "Running ${full_cmd[@]}"
@@ -838,6 +900,7 @@ function create_cluster() {
           ${optional_preemptible_arg} \
           ${image_flags} \
           --network=${GCE_NETWORK} \
+          --subnet=${GCE_SUBNET} \
           --tags=${GCE_TAGS} \
           --scopes $(export IFS=,; echo "${GCE_SERVICE_ACCOUNT_SCOPES[*]}";) \
           --boot-disk-type=pd-standard \
@@ -865,6 +928,7 @@ function create_cluster() {
         --machine-type=${GCE_MASTER_MACHINE_TYPE} \
         ${image_flags} \
         --network=${GCE_NETWORK} \
+        --subnet=${GCE_SUBNET} \
         --tags=${GCE_TAGS} \
         --scopes $(export IFS=,; echo "${GCE_SERVICE_ACCOUNT_SCOPES[*]}";) \
         --boot-disk-type=pd-standard \
@@ -1537,6 +1601,11 @@ function parse_input() {
       --network)
         validate_argument $1 $2
         echo "GCE_NETWORK=$2" >> ${OVERRIDES_FILE}
+        shift 2
+        ;;
+      --subnet)
+        validate_argument $1 $2
+        echo "GCE_SUBNET=$2" >> ${OVERRIDES_FILE}
         shift 2
         ;;
       --tags)

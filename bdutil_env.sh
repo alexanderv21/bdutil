@@ -1,3 +1,4 @@
+
 # Copyright 2014 Google Inc. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -36,18 +37,24 @@ PROJECT=""
 
 # GCE settings.
 GCE_MACHINE_TYPE='n1-standard-4'
+GCE_REGION=''
 GCE_ZONE=''
+
 # This should be a fully specified URI and will take precedence over other image
 # settings.
 GCE_IMAGE=''
+
 # These are the normal gcloud compute image flags documented here:
 # https://cloud.google.com/sdk/gcloud/reference/compute/instances/create
-GCE_IMAGE_FAMILY='debian-8'
-GCE_IMAGE_PROJECT='debian-cloud'
+# Default is Ubuntu 18.04
+GCE_IMAGE_FAMILY='ubuntu-1404-lts'
+GCE_IMAGE_PROJECT='ubuntu-os-cloud'
+
 # When setting a network it's important for all nodes be able to communicate
 # with eachother and for SSH connections to be allowed inbound to complete
 # cluster setup and configuration.
 GCE_NETWORK='default'
+GCE_SUBNET="projects/${PROJECT}/regions/${GCE_REGION}/subnetworks/${GCE_NETWORK}"
 
 # If non-empty, specifies the machine type for the master node separately from
 # worker nodes. If empty, defaults to using the same machine type as workers
@@ -138,6 +145,9 @@ WORKER_BOOT_DISK_SIZE_GB=
 # the master instance, creating master disks, running commands on the master,
 # deleting the master, deleting master disks, etc.
 SKIP_MASTER=false
+
+# Using internal IP when running SSH command
+INTERNAL_IP=true
 
 ###############################################################################
 
